@@ -16,6 +16,7 @@
 
 #include "ssid_config.h"
 
+#include "multipwm.h"
 #include "E131.h"
 
 e131_packet_t pbuff; /* Packet buffer */
@@ -53,8 +54,6 @@ void e131task(void *pvParameters) {
 	}
 
 	printf("Listening for connections.\r\n");
-	memset(pbuff.raw, 0, sizeof(pbuff.raw));
-	pwbuff = &pbuff;
 
 	while(1) {
 		//printf("Loop\r\n");
@@ -73,13 +72,54 @@ void e131task(void *pvParameters) {
 			} else {
 				//printf("Universe %d\n\n", pwbuff->universe);
 				//printf("Seq %d\n\n", pwbuff->sequence_number);
-				printf("V %d\n\n", pwbuff->property_values[1]);
+				//uint16_t dutyChannel1 = pwbuff->property_values[1];
+				//dutyChannel1 = dutyChannel1 << 8;
+				//dutyChannel1 = ~dutyChannel1; //Invert duty
+				//pwm_set_duty(dutyChannel1);
+				//if ((rand() % 100) == 0) {
+				//	printf("Channel 1: %d\n\n", pwbuff->property_values[1]);
+				//}
 			}
 		} else {
 			printf("Wrong packet size.\n\n");
 		}
 
 		netbuf_delete(buf);
+	}
+}
+
+void pwmtask(void *pvParameters)
+{
+	//Set up PWM for pins
+	uint8_t    pins[] = {14, 12, 13, 15, 3}; //NodeMCU D5-D9 https://github.com/nodemcu/nodemcu-devkit-v1.0#pin-map
+	pwm_info_t pwm_info;
+	pwm_info.channels = sizeof(pins);
+	multipwm_init(&pwm_info);
+	for (uint8_t ii=0; ii<pwm_info.channels; ii++) {
+		multipwm_set_pin(&pwm_info, ii, pins[ii]);
+	}
+
+    while(1) {
+		multipwm_stop(&pwm_info);
+
+		uint16_t channel[pwm_info.channels];
+		for (uint8_t i=0; i<pwm_info.channels; i++) {
+			channel[i] = pwbuff->property_values[i+1]; //Get DMX channel value from sACN struct
+			//Upscale 8 bit DMX value to 16 bit, and add original value to fit the range from 0-65535
+			channel[i] = (channel[i] << 8) + channel[i];
+			channel[i] = ~channel[i]; //Invert channel
+			multipwm_set_duty(&pwm_info, i, channel[i]);
+		}
+
+		//Only print values once every modula
+		if ((rand() % 50) == 0) {
+			for (uint8_t i=0; i<pwm_info.channels; i++) {
+				printf("Channel %d: %d\n", i+1, channel[i]);
+			}
+		}
+
+		multipwm_start(&pwm_info);
+		vTaskDelay(1);
 	}
 }
 
@@ -94,6 +134,9 @@ void user_init(void) {
     sdk_wifi_set_opmode(STATION_MODE);
     sdk_wifi_station_set_config(&config);
 
+	memset(pbuff.raw, 0, sizeof(pbuff.raw));
+	pwbuff = &pbuff;
 	xTaskCreate(e131task, "e131task", 768, NULL, 8, NULL);
+	xTaskCreate(pwmtask, "pwmtask", 256, NULL, 2, NULL);
 }
 
