@@ -23,7 +23,7 @@ e131_packet_t pbuff; /* Packet buffer */
 e131_packet_t *pwbuff; /* Pointer to working packet buffer */
 
 void e131task(void *pvParameters) {
-	printf("Open server in 10 seconds.\r\n");
+	printf("Open server.\r\n");
 	vTaskDelay(1000);
 
 	struct netconn *conn;
@@ -44,8 +44,7 @@ void e131task(void *pvParameters) {
 	}
 
 	ip4_addr_t multiaddr;
-	//IP4_ADDR(&multiaddr, 224, 0, 0, 0);
-	IP4_ADDR(&multiaddr, 239, 255, 0, 1);
+	IP4_ADDR(&multiaddr, 239, 255, 0, 1); //IPv4 local scope multicast
 
 	err = netconn_join_leave_group(conn, &multiaddr, &netif_default->ip_addr, NETCONN_JOIN);
 	if(err != ERR_OK) {
@@ -56,7 +55,6 @@ void e131task(void *pvParameters) {
 	printf("Listening for connections.\r\n");
 
 	while(1) {
-		//printf("Loop\r\n");
 		struct netbuf *buf;
 
 		err = netconn_recv(conn, &buf);
@@ -65,20 +63,10 @@ void e131task(void *pvParameters) {
 			continue;
 		}
 
-		//If packet is 638 bytes we handle it as a correct package and put it in
 		if(buf->p->tot_len == sizeof(pwbuff->raw)) {
+			//If packet is 638 bytes we handle it as a correct package and copy it to a global struct
 			if(netbuf_copy(buf, pwbuff->raw, sizeof(pwbuff->raw)) != buf->p->tot_len) {
 				printf("Error: Couldn't copy buffer. err=%d\r\n", err);
-			} else {
-				//printf("Universe %d\n\n", pwbuff->universe);
-				//printf("Seq %d\n\n", pwbuff->sequence_number);
-				//uint16_t dutyChannel1 = pwbuff->property_values[1];
-				//dutyChannel1 = dutyChannel1 << 8;
-				//dutyChannel1 = ~dutyChannel1; //Invert duty
-				//pwm_set_duty(dutyChannel1);
-				//if ((rand() % 100) == 0) {
-				//	printf("Channel 1: %d\n\n", pwbuff->property_values[1]);
-				//}
 			}
 		} else {
 			printf("Wrong packet size.\n\n");
@@ -94,6 +82,7 @@ void pwmtask(void *pvParameters)
 	uint8_t    pins[] = {14, 12, 13, 15, 3}; //NodeMCU D5-D9 https://github.com/nodemcu/nodemcu-devkit-v1.0#pin-map
 	pwm_info_t pwm_info;
 	pwm_info.channels = sizeof(pins);
+	pwm_info.reverse = true;
 	multipwm_init(&pwm_info);
 	for (uint8_t ii=0; ii<pwm_info.channels; ii++) {
 		multipwm_set_pin(&pwm_info, ii, pins[ii]);
@@ -107,7 +96,6 @@ void pwmtask(void *pvParameters)
 			channel[i] = pwbuff->property_values[i+1]; //Get DMX channel value from sACN struct
 			//Upscale 8 bit DMX value to 16 bit, and add original value to fit the range from 0-65535
 			channel[i] = (channel[i] << 8) + channel[i];
-			channel[i] = ~channel[i]; //Invert channel
 			multipwm_set_duty(&pwm_info, i, channel[i]);
 		}
 
